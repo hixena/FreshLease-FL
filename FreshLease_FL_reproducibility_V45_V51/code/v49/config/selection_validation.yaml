@@ -1,0 +1,65 @@
+selection_validation:
+  seed: 20269010
+  repeats: 20
+  rounds: 60
+  nodes: 10
+  output_dir: selection_results
+  selective_submit_rates: [0.40, 0.50, 0.60, 0.70]
+  benign_loss_rates: [0.00, 0.05, 0.10, 0.20]
+  max_consecutive_failures: 60
+
+simulation:
+  observation_noise_std: 0.08
+  current_evidence_noise_std: 0.12
+  current_evidence_signal: 0.45
+  low_quality_source_rate: 0.20
+  reliable_source_quality: 0.95
+  low_source_quality: 0.65
+  max_feedback_delay: 5
+  freshness_tau: 5.0
+  beta_binary_threshold: 0.60
+  dirichlet_bins: [0.20, 0.40, 0.60, 0.80]
+  current_evidence_missing_rate: 0.05
+  current_evidence_age_max: 5
+  current_evidence_freshness_tau: 5.0
+  current_consistency_scale: 4.0
+  current_predictive_quality: 0.75
+  probation_completion_benign: 0.95
+  probation_completion_malicious: 0.85
+  profiles: [stable_benign]
+
+models:
+  prior_strength: 2.0
+  prior_mean: 0.50
+  forgetting_factor: 0.97
+  ema_alpha: 0.20
+  fixed_current_weight: 0.50
+  lambda_min: 0.35
+  kappa: 20.0
+  lower_quantile: 0.05
+  utility: [0.00, 0.25, 0.50, 0.75, 1.00]
+  history_confidence_kappa: 10.0
+  current_uncertainty_scale: 0.15
+  confidence_min: 0.25
+  limited_access_threshold: 0.50
+  full_access_threshold: 0.60
+  min_history_evidence: 5.0
+  min_history_confidence: 0.15
+  max_history_std: 0.16
+  max_current_weight_after_activation: 0.65
+  probation_min_completed_tasks: 5
+  probation_min_evidence_mass: 1.50
+  probation_min_evidence_types: 3
+  probation_repeat_decay_power: 0.50
+  probation_max_attempts: 40
+  probation_max_cost: 25.0
+  probation_max_consecutive_failures: 5
+  probation_cooldown_rounds: 10
+  probation_max_reapplications: 2
+  probation_reattest_min_reliability: 0.50
+  probation_missing_penalty: 0.20
+  probation_max_acknowledged_missing_rate: 0.25
+  probation_missing_min_acknowledged: 4
+
+reporting:
+  figure_dpi: 180

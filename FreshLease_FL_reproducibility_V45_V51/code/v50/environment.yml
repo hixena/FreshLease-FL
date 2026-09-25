@@ -1,0 +1,17 @@
+name: node-trust-phase1
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.24,<3
+  - pandas>=2.0,<3
+  - scipy>=1.10,<2
+  - scikit-learn>=1.3,<2
+  - matplotlib>=3.7,<4
+  - seaborn>=0.12,<1
+  - pyyaml>=6,<7
+  - cryptography>=44,<47
+  - pytest>=7.4,<9
+  - pip
+  - pip:
+      - -e .

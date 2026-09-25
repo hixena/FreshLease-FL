@@ -1,0 +1,80 @@
+param(
+    [int]$Repeats = 1,
+    [int]$Rounds = 10,
+    [int]$AttackStartRound = 2,
+    [double[]]$NonIIDAlphas = @(0.5),
+    [string[]]$Datasets = @("fashion_mnist"),
+    [int]$ClientCount = 10,
+    [int]$TaskDeadlineSeconds = 30,
+    [int]$BarrierTimeoutSeconds = 600,
+    [int]$ClientJoinTimeoutSeconds = 300,
+    [string[]]$Methods = @(
+        "no_online_revalidation", "fltrust", "trimmed_mean",
+        "progressive_full", "progressive_fltrust", "progressive_trimmed_mean"
+    ),
+    [string[]]$AttackScenarios = @("diverse_then_repeat_backdoor"),
+    [switch]$SkipBuild,
+    [string]$ResultDirectory = ""
+)
+
+$ErrorActionPreference = "Stop"
+$allowedMethods = @(
+    "no_online_revalidation", "full", "fltrust", "trimmed_mean",
+    "coordinate_median", "progressive_no_cumulative", "progressive_full",
+    "progressive_fltrust", "progressive_trimmed_mean"
+)
+foreach ($method in $Methods) {
+    if ($method -notin $allowedMethods) { throw "Unknown V36 method: $method" }
+}
+$allowedAttackScenarios = @(
+    "gradual_drift_betrayal", "benign_concept_drift",
+    "diverse_then_repeat_backdoor"
+)
+foreach ($scenario in $AttackScenarios) {
+    if ($scenario -notin $allowedAttackScenarios) {
+        throw "Unknown V36 attack scenario: $scenario"
+    }
+}
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$runner = Join-Path $scriptDir "run_real_fl_matrix.ps1"
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$resolvedResultDirectory = if ($ResultDirectory) {
+    $ResultDirectory
+} else {
+    Join-Path $scriptDir "hybrid_aggregation_v36_results-$stamp"
+}
+$arguments = @{
+    Repeats = $Repeats
+    Rounds = $Rounds
+    AttackStartRound = $AttackStartRound
+    LimitedCleanUpdates = 3
+    LimitedAggregationWeight = 0.75
+    CumulativeRiskDecay = 0.50
+    CumulativeRiskThreshold = 0.72
+    SelfReversalGate = 0.20
+    NonIIDAlphas = $NonIIDAlphas
+    Datasets = $Datasets
+    ClientCount = $ClientCount
+    TaskDeadlineSeconds = $TaskDeadlineSeconds
+    BarrierTimeoutSeconds = $BarrierTimeoutSeconds
+    ClientJoinTimeoutSeconds = $ClientJoinTimeoutSeconds
+    TrustEstimators = @("dirichlet_lcb")
+    Variants = $Methods
+    AttackScenarios = $AttackScenarios
+    ResultDirectory = $resolvedResultDirectory
+}
+if ($SkipBuild) { $arguments.SkipBuild = $true }
+
+Write-Host "V36 hybrid aggregation: clients=$ClientCount methods=$($Methods -join ',') datasets=$($Datasets -join ',') scenarios=$($AttackScenarios -join ',')"
+& $runner @arguments
+if ($LASTEXITCODE -ne 0) { throw "V36 hybrid-aggregation matrix failed" }
+
+python (Join-Path $scriptDir "analyze_paper_baselines.py") `
+    (Join-Path $resolvedResultDirectory "real_fl_node_results.csv") `
+    (Join-Path $resolvedResultDirectory "real_fl_round_node_events.csv") `
+    (Join-Path $resolvedResultDirectory "real_fl_round_metrics.csv") `
+    (Join-Path $resolvedResultDirectory "hybrid_aggregation_v36_runs.csv") `
+    (Join-Path $resolvedResultDirectory "hybrid_aggregation_v36_summary.csv") `
+    $AttackStartRound
+if ($LASTEXITCODE -ne 0) { throw "V36 hybrid-aggregation summary generation failed" }
+Write-Host "V36 summary: $(Join-Path $resolvedResultDirectory 'hybrid_aggregation_v36_summary.csv')"

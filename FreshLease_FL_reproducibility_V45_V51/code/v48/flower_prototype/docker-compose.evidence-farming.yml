@@ -1,0 +1,414 @@
+x-image: &image
+  image: node-access-flower-prototype:0.23
+  build:
+    context: ..
+    dockerfile: flower_prototype/Dockerfile
+
+x-client: &client
+  <<: *image
+  command: ["python", "-m", "flower_prototype.client"]
+  depends_on:
+    access-controller:
+      condition: service_healthy
+    flower-server:
+      condition: service_started
+  environment: &client-env
+    ACCESS_URL: http://access-controller:8000
+    FLOWER_SERVER: flower-server:8080
+    MAX_ONBOARDING_TASKS: "24"
+    POLL_SECONDS: "0.15"
+    FLOWER_JOIN_DELAY: "1.0"
+    EXPERIMENT_SEED: ${EXPERIMENT_SEED:-0}
+    EXPECTED_EXPERIMENT_NODES: ${EXPECTED_EXPERIMENT_NODES:-10}
+    BARRIER_TIMEOUT_SECONDS: ${BARRIER_TIMEOUT_SECONDS:-600}
+    NETWORK_JITTER_SECONDS: "0.08"
+    BENIGN_UNCONFIRMED_RATE: "0.03"
+    DATA_MODE: ${DATA_MODE:-synthetic}
+    DATASET_NAME: ${DATASET_NAME:-digits}
+    DATASET_PATH: ${DATASET_PATH:-}
+    NUM_DATA_PARTITIONS: ${NUM_DATA_PARTITIONS:-10}
+    NONIID_ALPHA: ${NONIID_ALPHA:-0.5}
+    LOCAL_EPOCHS: ${LOCAL_EPOCHS:-2}
+    LOCAL_LEARNING_RATE: ${LOCAL_LEARNING_RATE:-0.15}
+    MAX_LOCAL_TRAIN_SAMPLES: ${MAX_LOCAL_TRAIN_SAMPLES:-0}
+    POISON_FRACTION: ${POISON_FRACTION:-0.4}
+    SIGN_FLIP_SCALE: ${SIGN_FLIP_SCALE:-3.0}
+    GRADUAL_SIGN_FLIP_SCALE: ${GRADUAL_SIGN_FLIP_SCALE:-0.35}
+    ATTACK_SCENARIO: ${ATTACK_SCENARIO:-all}
+    ATTACK_START_ROUND: ${ATTACK_START_ROUND:-1}
+    BENIGN_DRIFT_TRANSITION_ROUNDS: ${BENIGN_DRIFT_TRANSITION_ROUNDS:-4}
+    BENIGN_DRIFT_TARGET_PARTITION: ${BENIGN_DRIFT_TARGET_PARTITION:-5}
+    EXPERIMENT_VARIANT: ${MECHANISM_VARIANT:-full}
+  restart: "no"
+
+services:
+  access-controller:
+    <<: *image
+    command: ["uvicorn", "flower_prototype.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      ACCESS_DATA_DIR: /data
+      TASK_DEADLINE_SECONDS: ${TASK_DEADLINE_SECONDS:-30}
+      MAX_PROBATION_TASKS: ${MAX_PROBATION_TASKS:-20}
+      MIN_PROBATION_COMPLETED_TASKS: ${MIN_PROBATION_COMPLETED_TASKS:-9}
+      MIN_EVIDENCE_MASS: ${MIN_EVIDENCE_MASS:-1.50}
+      MIN_LIMITED_CLEAN_UPDATES: ${MIN_LIMITED_CLEAN_UPDATES:-2}
+      MIN_LIMITED_OBSERVATION_UPDATES: ${MIN_LIMITED_OBSERVATION_UPDATES:-2}
+      LIMITED_AGGREGATION_WEIGHT: ${LIMITED_AGGREGATION_WEIGHT:-0.25}
+      ACCESS_LEASE_FULL_UPDATES: ${ACCESS_LEASE_FULL_UPDATES:-5}
+      MECHANISM_VARIANT: ${MECHANISM_VARIANT:-full}
+      TRUST_ESTIMATOR: ${TRUST_ESTIMATOR:-dirichlet_lcb}
+      INCUMBENT_NODE_IDS: ${INCUMBENT_NODE_IDS:-}
+      FL_CONTROL_TOKEN: ${FL_CONTROL_TOKEN:-}
+      SOURCE_VERIFIER_PUBLIC_KEY: ${SOURCE_VERIFIER_PUBLIC_KEY:-}
+      EXPECTED_EXPERIMENT_NODES: ${EXPECTED_EXPERIMENT_NODES:-10}
+    volumes:
+      - controller-data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  flower-server:
+    <<: *image
+    command: ["python", "-m", "flower_prototype.server"]
+    environment:
+      FLOWER_ROUNDS: ${FLOWER_ROUNDS:-20}
+      FLOWER_MIN_CLIENTS: ${FLOWER_MIN_CLIENTS:-10}
+      ACCESS_URL: http://access-controller:8000
+      EXPECTED_EXPERIMENT_NODES: ${EXPECTED_EXPERIMENT_NODES:-10}
+      BARRIER_TIMEOUT_SECONDS: ${BARRIER_TIMEOUT_SECONDS:-600}
+      CLIENT_JOIN_TIMEOUT_SECONDS: ${CLIENT_JOIN_TIMEOUT_SECONDS:-300}
+      DATA_MODE: ${DATA_MODE:-synthetic}
+      DATASET_NAME: ${DATASET_NAME:-digits}
+      DATASET_PATH: ${DATASET_PATH:-}
+      VALIDATION_SAMPLES_PER_CLASS: ${VALIDATION_SAMPLES_PER_CLASS:-0}
+      TEST_SAMPLES_PER_CLASS: ${TEST_SAMPLES_PER_CLASS:-0}
+      GLOBAL_METRICS_PATH: /results/global_metrics.csv
+      ROUND_NODE_EVENTS_PATH: /results/round_node_events.csv
+      MECHANISM_VARIANT: ${MECHANISM_VARIANT:-full}
+      CUMULATIVE_RISK_DECAY: ${CUMULATIVE_RISK_DECAY:-0.50}
+      CUMULATIVE_RISK_THRESHOLD: ${CUMULATIVE_RISK_THRESHOLD:-0.90}
+      SELF_REVERSAL_GATE: ${SELF_REVERSAL_GATE:-0.20}
+      NORM_ESCALATION_MODE: ${NORM_ESCALATION_MODE:-enforce}
+      AGGREGATION_RULE: ${AGGREGATION_RULE:-fedavg}
+      TRIMMED_MEAN_COUNT: ${TRIMMED_MEAN_COUNT:-1}
+      FLTRUST_ROOT_EPOCHS: ${FLTRUST_ROOT_EPOCHS:-1}
+      FLTRUST_ROOT_LEARNING_RATE: ${FLTRUST_ROOT_LEARNING_RATE:-0.05}
+      FLTRUST_ROOT_BATCH_SIZE: ${FLTRUST_ROOT_BATCH_SIZE:-32}
+      RFFL_REPUTATION_FADE: ${RFFL_REPUTATION_FADE:-0.95}
+      RFFL_REPUTATION_THRESHOLD_SCALE: ${RFFL_REPUTATION_THRESHOLD_SCALE:-0.3333333333333333}
+      FL_CONTROL_TOKEN: ${FL_CONTROL_TOKEN:-}
+    volumes:
+      - flower-results:/results
+    depends_on:
+      access-controller:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  honest-1:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-1
+      PROFILE: honest
+      PARTITION_ID: "0"
+    volumes: [honest-1-state:/state]
+
+  honest-2:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-2
+      PROFILE: honest
+      PARTITION_ID: "1"
+    volumes: [honest-2-state:/state]
+
+  honest-3:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-3
+      PROFILE: honest
+      PARTITION_ID: "2"
+    volumes: [honest-3-state:/state]
+
+  honest-4:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-4
+      PROFILE: honest
+      PARTITION_ID: "3"
+    volumes: [honest-4-state:/state]
+
+  honest-5:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-5
+      PROFILE: honest
+      PARTITION_ID: "4"
+    volumes: [honest-5-state:/state]
+
+  honest-6:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-6
+      PROFILE: honest
+      PARTITION_ID: "5"
+    volumes: [honest-6-state:/state]
+
+  honest-7:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-7
+      PROFILE: honest
+      PARTITION_ID: "6"
+    volumes: [honest-7-state:/state]
+
+  honest-8:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-8
+      PROFILE: honest
+      PARTITION_ID: "7"
+    volumes: [honest-8-state:/state]
+
+  honest-9:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-9
+      PROFILE: honest
+      PARTITION_ID: "8"
+    volumes: [honest-9-state:/state]
+
+  honest-10:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-10
+      PROFILE: honest
+      PARTITION_ID: "9"
+    volumes: [honest-10-state:/state]
+
+  honest-11:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-11
+      PROFILE: honest
+      PARTITION_ID: "10"
+    volumes: [honest-11-state:/state]
+
+  honest-12:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-12
+      PROFILE: honest
+      PARTITION_ID: "11"
+    volumes: [honest-12-state:/state]
+
+  honest-13:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-13
+      PROFILE: honest
+      PARTITION_ID: "12"
+    volumes: [honest-13-state:/state]
+
+  honest-14:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-14
+      PROFILE: honest
+      PARTITION_ID: "13"
+    volumes: [honest-14-state:/state]
+
+  honest-15:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-15
+      PROFILE: honest
+      PARTITION_ID: "14"
+    volumes: [honest-15-state:/state]
+
+  honest-16:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-16
+      PROFILE: honest
+      PARTITION_ID: "15"
+    volumes: [honest-16-state:/state]
+
+  honest-17:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-17
+      PROFILE: honest
+      PARTITION_ID: "16"
+    volumes: [honest-17-state:/state]
+
+  honest-18:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-18
+      PROFILE: honest
+      PARTITION_ID: "17"
+    volumes: [honest-18-state:/state]
+
+  honest-19:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-19
+      PROFILE: honest
+      PARTITION_ID: "18"
+    volumes: [honest-19-state:/state]
+
+  single-type-farming:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: single-type-farming
+      PROFILE: single_type_farming
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [single-type-state:/state]
+
+  diverse-repeat-farming:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: diverse-repeat-farming
+      PROFILE: diverse_then_repeat_farming
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [diverse-repeat-state:/state]
+
+  three-type-repeat-farming:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: three-type-repeat-farming
+      PROFILE: three_type_repeat_farming
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [three-type-repeat-state:/state]
+
+  gradual-drift-betrayal:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: gradual-drift-betrayal
+      PROFILE: gradual_drift_betrayal
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [gradual-drift-state:/state]
+
+  benign-concept-drift:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: benign-concept-drift
+      PROFILE: benign_concept_drift
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [benign-concept-drift-state:/state]
+
+  diverse-repeat-backdoor:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: diverse-repeat-backdoor
+      PROFILE: diverse_then_repeat_backdoor
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [diverse-repeat-backdoor-state:/state]
+
+  shadow-exact-replay:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: shadow-exact-replay
+      PROFILE: shadow_exact_replay
+      PARTITION_ID: "4"
+    volumes: [shadow-exact-replay-state:/state]
+
+  attestation-camouflage:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: attestation-camouflage
+      PROFILE: attestation_camouflage
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [attestation-camouflage-state:/state]
+
+  false-quality-reporting:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: false-quality-reporting
+      PROFILE: false_quality_reporting
+      PARTITION_ID: ${TARGET_PARTITION_ID:-9}
+    volumes: [false-quality-state:/state]
+
+  attacker-1:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: attacker-1
+      PROFILE: ${ATTACKER_PROFILE:-diverse_then_repeat_backdoor}
+      PARTITION_ID: ${TARGET_PARTITION_ID_1:-9}
+    volumes: [attacker-1-state:/state]
+
+  attacker-2:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: attacker-2
+      PROFILE: ${ATTACKER_PROFILE:-diverse_then_repeat_backdoor}
+      PARTITION_ID: ${TARGET_PARTITION_ID_2:-19}
+    volumes: [attacker-2-state:/state]
+
+volumes:
+  controller-data:
+  honest-1-state:
+  honest-2-state:
+  honest-3-state:
+  honest-4-state:
+  honest-5-state:
+  honest-6-state:
+  honest-7-state:
+  honest-8-state:
+  honest-9-state:
+  honest-10-state:
+  honest-11-state:
+  honest-12-state:
+  honest-13-state:
+  honest-14-state:
+  honest-15-state:
+  honest-16-state:
+  honest-17-state:
+  honest-18-state:
+  honest-19-state:
+  single-type-state:
+  diverse-repeat-state:
+  three-type-repeat-state:
+  gradual-drift-state:
+  benign-concept-drift-state:
+  diverse-repeat-backdoor-state:
+  shadow-exact-replay-state:
+  attestation-camouflage-state:
+  false-quality-state:
+  attacker-1-state:
+  attacker-2-state:
+  flower-results:

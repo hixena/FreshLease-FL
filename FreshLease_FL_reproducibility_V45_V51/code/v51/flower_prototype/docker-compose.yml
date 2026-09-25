@@ -1,0 +1,86 @@
+services:
+  access-controller:
+    build:
+      context: ..
+      dockerfile: flower_prototype/Dockerfile
+    command: ["uvicorn", "flower_prototype.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      ACCESS_DATA_DIR: /data
+      TASK_DEADLINE_SECONDS: "1.2"
+      TRUST_ESTIMATOR: ${TRUST_ESTIMATOR:-dirichlet_lcb}
+    volumes:
+      - controller-data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  flower-server:
+    build:
+      context: ..
+      dockerfile: flower_prototype/Dockerfile
+    command: ["python", "-m", "flower_prototype.server"]
+    environment:
+      FLOWER_ROUNDS: "3"
+      FLOWER_MIN_CLIENTS: "3"
+    ports:
+      - "8080:8080"
+
+  honest-1:
+    <<: &client
+      build:
+        context: ..
+        dockerfile: flower_prototype/Dockerfile
+      command: ["python", "-m", "flower_prototype.client"]
+      depends_on:
+        access-controller:
+          condition: service_healthy
+        flower-server:
+          condition: service_started
+      environment: &client-env
+        ACCESS_URL: http://access-controller:8000
+        FLOWER_SERVER: flower-server:8080
+      restart: "no"
+    environment:
+      <<: *client-env
+      NODE_ID: honest-1
+      PROFILE: honest
+    volumes:
+      - honest-1-state:/state
+
+  honest-2:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: honest-2
+      PROFILE: honest
+    volumes:
+      - honest-2-state:/state
+
+  benign-unreliable:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: benign-unreliable
+      PROFILE: benign_unreliable
+    volumes:
+      - benign-unreliable-state:/state
+
+  selective:
+    <<: *client
+    environment:
+      <<: *client-env
+      NODE_ID: selective
+      PROFILE: selective
+    volumes:
+      - selective-state:/state
+
+volumes:
+  controller-data:
+  honest-1-state:
+  honest-2-state:
+  benign-unreliable-state:
+  selective-state:
